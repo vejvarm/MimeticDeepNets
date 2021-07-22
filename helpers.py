@@ -204,3 +204,21 @@ def sort_results_by_metric(checkpoint_folder, metric="f1score"):
     timestamp_list = [os.path.split(p)[-1] for s, p in score_path_list]
 
     return score_path_list, timestamp_list
+
+
+def time_stamp_to_full_path(base_folder, time_stamp):
+    path_gen = os.walk(base_folder)
+
+    for base, sub, files in path_gen:
+        if time_stamp in sub:
+            return os.path.join(base, time_stamp)
+
+
+def random_dataset(nsamples, nclasses, batch_size=2):
+    x = np.random.uniform(size=(nsamples, 600, 30))
+    y = np.random.choice(np.arange(0, nclasses), size=(nsamples, ))
+    y_one_hot = tf.one_hot(y, nclasses)
+
+    data = tf.data.Dataset.from_tensor_slices((x, y_one_hot))
+    data = data.shuffle(nsamples).batch(batch_size)
+    return data

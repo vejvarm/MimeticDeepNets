@@ -11,7 +11,8 @@ from tensorflow.data import Dataset
 
 from flags import FLAGS
 from helpers import load_npy_files_from_folder, calc_class_weights, initialize_callbacks, \
-    make_train_and_test_from_dict_of_datasets, iterative_ds_concatenate, save_to_pickle
+    make_train_and_test_from_dict_of_datasets, iterative_ds_concatenate, save_to_pickle, sort_results_by_metric,\
+    time_stamp_to_full_path
 from model import compile_model
 
 ROOT = FLAGS.ROOT
@@ -73,7 +74,7 @@ def create_balanced_oversampled_pipeline(x, y, batch_size=8, oversampler=SMOTE()
     return ds
 
 
-def train():
+def train(model_type: str = FLAGS.CHOSEN_MODEL):
     # Load unbalanced data into tensorflow datasets
     xval_ds_dict = {}
     for xval_group in FLAGS.XVAL_GROUPS:
@@ -117,7 +118,7 @@ def train():
                                                                                      f"xval-{test_group}"))
 
                 # COMPILE MODEL
-                model = compile_model(model_type=FLAGS.CHOSEN_MODEL, lr=lr, initial_output_bias=initial_bias)
+                model = compile_model(model_type=model_type, lr=lr, initial_output_bias=initial_bias)
 
                 # TRAIN MODEL (weighted classes)
                 model.fit(ds_train, validation_data=ds_test, epochs=FLAGS.NUM_EPOCHS, callbacks=callbacks,
@@ -132,6 +133,8 @@ def train():
                                                                  relative_path_to_current_run)
             with open(os.path.join(path_to_current_run_checkpoint_folder, "eval_results.json"), "w") as f:
                 json.dump(eval_results_dict, f, indent=4)
+            with open(os.path.join(path_to_current_run_checkpoint_folder, "model_params.json"), "w") as f:
+                json.dump(FLAGS.PARAMS[model_type], f, indent=4)
 
             print("TEST GROUP ACCURACY".center(30, "-"))
             print("|"+f"lr: {lr:.5f} | bs: {bs:03d}".center(28, " ")+"|")
@@ -140,7 +143,7 @@ def train():
             print("".center(30, "-"))
 
 
-def predict():
+def predict(time_stamp_list=FLAGS.PREDICTION_TIME_STAMPS, score_path_list=None, model_type: str = FLAGS.CHOSEN_MODEL):
     # Load unbalanced data into tensorflow datasets
     full_ds = None
     full_ds_info = None
@@ -167,45 +170,44 @@ def predict():
 
     # GRID LOAD:
     full_result_dict = {}
-    for lr in FLAGS.PRED_LR:
-        for bs in FLAGS.PRED_BATCH_SIZE:
-            current_checkpoint_folder = os.path.join(RESULTS_FOLDER, "checkpoints", f"lr-{lr}", f"bs-{bs}")
-            # print(current_checkpoint_folder)
-            time_stamps = next(os.walk(current_checkpoint_folder))[1]
-            # print(time_stamps)
-            for ts in time_stamps:
-                result_dict = {}
-                for test_group in FLAGS.XVAL_GROUPS:
-                    result_list = []
-                    print(f"Current xVal test group: {test_group}")
+    # print(current_checkpoint_folder)
+    # print(time_stamps)
+    for run_id, ts in enumerate(time_stamp_list):
+        current_run_folder = time_stamp_to_full_path(os.path.join(RESULTS_FOLDER, FLAGS.CHECKPOINT_FOLDER), ts)
+        result_dict = {}
+        for test_group in FLAGS.XVAL_GROUPS:
+            result_list = []
+            print(f"Current xVal test group: {test_group}")
 
-                    # load model from checkpoint
-                    model = compile_model(model_type=FLAGS.CHOSEN_MODEL,
-                                          checkpoint_folder=os.path.join(current_checkpoint_folder,
-                                                                         ts,
-                                                                         f"xval-{test_group}"))
+            # load model from checkpoint
+            model = compile_model(model_type=model_type,
+                                  checkpoint_folder=os.path.join(current_run_folder,
+                                                                 f"xval-{test_group}"))
 
-                    # predict probabilities from loaded model
-                    probs = model.predict(full_ds)
+            # predict probabilities from loaded model
+            probs = model.predict(full_ds)
 
-                    # infer most probable classes from probabilities
-                    predictions = np.argmax(probs, axis=1)
+            # infer most probable classes from probabilities
+            predictions = np.argmax(probs, axis=1)
 
-                    # append to list of tuples: (file_name, xval_group, true_label, predicted_label, class_probs)
-                    for (fn, xgrp), (_, tl), pl, cprob in zip(full_ds_info, full_ds, predictions, probs):
-                        result_list.append((fn.numpy()[0], xgrp.numpy()[0], np.argmax(tl), pl, cprob))
+            # append to list of tuples: (file_name, xval_group, true_label, predicted_label, class_probs)
+            for (fn, xgrp), (_, tl), pl, cprob in zip(full_ds_info, full_ds, predictions, probs):
+                result_list.append((fn.numpy()[0], xgrp.numpy()[0], np.argmax(tl), pl, cprob))
 
-                    # sort list by name and date:
-                    result_list.sort(key=lambda tup: tup[0])
+            # sort list by name and date:
+            result_list.sort(key=lambda tup: tup[0])
 
-                    # add sorted list to dict for current xval group
-                    result_dict[test_group] = result_list
+            # add sorted list to dict for current xval group
+            result_dict[test_group] = result_list
 
-                # save list to pickle file
-                save_to_pickle(os.path.join(current_checkpoint_folder, ts, "prediction_results.p"), result_dict,
-                               verbosity=1)
-                # add new entry to full results dict
-                full_result_dict[f"lr-{lr}_bs-{bs}_ts-{ts}"] = result_dict
+        # save list to pickle file
+        save_to_pickle(os.path.join(current_run_folder, "prediction_results.p"), result_dict,
+                       verbosity=1)
+        # add new entry to full results dict
+        if score_path_list:
+            full_result_dict[f"{score_path_list[run_id][0]:.2f}_ts-{ts}"] = result_dict
+        else:
+            full_result_dict[f"{run_id:03}_ts-{ts}"] = result_dict
 
     # Save full_result_dict
     save_to_pickle(os.path.join(RESULTS_FOLDER, "checkpoints", f"full_result_dict_{ts}.p"), full_result_dict,
@@ -214,6 +216,8 @@ def predict():
 
 if __name__ == "__main__":
     train()
-    predict()
+    score_path_list, timestamp_list = sort_results_by_metric(os.path.join(RESULTS_FOLDER, FLAGS.CHECKPOINT_FOLDER),
+                                                             metric="f1score")
+    predict(timestamp_list, score_path_list)
 
     # TODO: run evaluation after this finishes

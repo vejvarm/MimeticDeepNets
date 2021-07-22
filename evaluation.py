@@ -4,7 +4,7 @@ from typing import Union, Tuple, List
 import pandas as pd
 
 from flags import FLAGS
-from helpers import load_from_pickle, decode_class
+from helpers import load_from_pickle, decode_class, sort_results_by_metric
 
 ROOT = FLAGS.ROOT
 RESULTS_FOLDER = FLAGS.RESULTS_FOLDER
@@ -31,5 +31,11 @@ def eval_results(time_stamps: Union[Tuple, List],
 
 
 if __name__ == '__main__':
-    time_stamps_to_eval = ["1615501805.9779403"]
+    time_stamps_to_eval = ["1616007514.9154973"]
     eval_results(time_stamps_to_eval)
+
+    metric = "f1score"
+
+    score_path_list, _ = sort_results_by_metric(os.path.join(ROOT, RESULTS_FOLDER, "checkpoints"), metric)
+
+    print(f"{metric}: {[s for s, p in score_path_list]}")

@@ -1,7 +1,7 @@
 import os
 
 from flags import FLAGS
-from helpers import list_all_eval_results, load_all_eval_results, sort_results_by_metric
+from helpers import list_all_eval_results, load_all_eval_results, sort_results_by_metric, time_stamp_to_full_path
 
 BASE_FOLDER = os.path.join(FLAGS.ROOT, FLAGS.RESULTS_FOLDER, FLAGS.CHECKPOINT_FOLDER)
 
@@ -14,3 +14,8 @@ if __name__ == '__main__':
 
     print(sorted_list)
     print(timestamp_list)
+
+    for ts in timestamp_list:
+        full_path_to_ts = time_stamp_to_full_path(BASE_FOLDER, ts)
+
+        print(ts, full_path_to_ts)
